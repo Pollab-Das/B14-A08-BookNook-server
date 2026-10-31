@@ -57,7 +57,8 @@ const verifyToken = async (req, res, next) => {
 // GET /books — public, sorted newest first
 app.get("/books", async (req, res) => {
   try {
-    const books = await booksCollection.find().sort({ createdAt: -1 }).toArray();
+    // ডেটাবেসে createdAt স্ট্রিং হিসেবে থাকলে sort() কাজ করে না, তাই আপাতত sort বাদ দেওয়া হলো
+    const books = await booksCollection.find().toArray();
     res.json(books);
   } catch (error) {
     res.status(500).json({ msg: "Failed to fetch books" });
@@ -67,7 +68,6 @@ app.get("/books", async (req, res) => {
 // GET /books/:id — one book
 app.get("/books/:id", async (req, res) => {
   try {
-    // MongoDB তে আইডি স্ট্রিং হিসেবে আসে, তাই Number() এ কনভার্ট করা হলো
     const book = await booksCollection.findOne({ _id: Number(req.params.id) });
     if (!book) return res.status(404).json({ msg: "Book not found" });
     res.json(book);
@@ -79,7 +79,7 @@ app.get("/books/:id", async (req, res) => {
 // POST /books — protected
 app.post("/books", verifyToken, async (req, res) => {
   try {
-    // নতুন বই অ্যাড করার সময় যদি _id না থাকে, তবে সর্বোচ্চ _id এর সাথে ১ যোগ করে দেয়া হচ্ছে
+    // নতুন আইডি জেনারেট করা (সর্বোচ্চ আইডি + ১)
     const lastBook = await booksCollection.find().sort({ _id: -1 }).limit(1).toArray();
     const newId = lastBook.length > 0 ? lastBook[0]._id + 1 : 1;
 
@@ -121,13 +121,12 @@ app.delete("/books/:id", verifyToken, async (req, res) => {
 
 // 📖 BORROWS ROUTES
 
-// POST /borrows — protected, borrow a book
+// POST /borrows — protected
 app.post("/borrows", verifyToken, async (req, res) => {
   try {
     const { bookId, userEmail } = req.body;
     const numericBookId = Number(bookId);
 
-    // Check if already borrowed by same user
     const existing = await borrowsCollection.findOne({
       bookId: numericBookId,
       userEmail,
@@ -137,13 +136,11 @@ app.post("/borrows", verifyToken, async (req, res) => {
       return res.status(400).json({ msg: "You already borrowed this book" });
     }
 
-    // Check available copies
     const book = await booksCollection.findOne({ _id: numericBookId });
     if (!book || book.availableCopies <= 0) {
       return res.status(400).json({ msg: "No copies available" });
     }
 
-    // Decrease available copies
     await booksCollection.updateOne(
       { _id: numericBookId },
       { $inc: { availableCopies: -1 } }
@@ -155,7 +152,7 @@ app.post("/borrows", verifyToken, async (req, res) => {
       bookImage: book.image,
       userEmail,
       borrowDate: new Date(),
-      returnDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      returnDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       status: "active",
     };
     const result = await borrowsCollection.insertOne(borrow);
@@ -165,7 +162,7 @@ app.post("/borrows", verifyToken, async (req, res) => {
   }
 });
 
-// GET /borrows — protected, get user's borrows
+// GET /borrows — protected
 app.get("/borrows", verifyToken, async (req, res) => {
   try {
     const { email } = req.query;
@@ -179,14 +176,12 @@ app.get("/borrows", verifyToken, async (req, res) => {
   }
 });
 
-// DELETE /borrows/:id — protected, return a book
-// নোট: বরো ডকুমেন্টের _id MongoDB অটোমেটিক ObjectId হিসেবে জেনারেট করে
+// DELETE /borrows/:id — protected
 app.delete("/borrows/:id", verifyToken, async (req, res) => {
   try {
     const borrow = await borrowsCollection.findOne({ _id: new ObjectId(req.params.id) });
     if (!borrow) return res.status(404).json({ msg: "Borrow record not found" });
 
-    // Increase available copies back
     await booksCollection.updateOne(
       { _id: borrow.bookId },
       { $inc: { availableCopies: 1 } }
