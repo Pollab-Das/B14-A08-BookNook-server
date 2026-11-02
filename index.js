@@ -5,7 +5,7 @@ import "dotenv/config";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import dns from "node:dns/promises";
 
-// DNS সমস্যা এড়ানোর জন্য
+// DNS রিজলভ ইস্যু এড়াতে
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 const app = express();
@@ -24,7 +24,11 @@ async function connectToMongoDB() {
   }
 }
 
-app.use(cors());
+// CORS কনফিগারেশন (ফ্রন্টএন্ড থেকে রিকোয়েস্ট অ্যালাউ করার জন্য)
+app.use(cors({
+  origin: process.env.CLIENT_URL || "http://localhost:3000" ||"https://b14-a08-book-nook-client.vercel.app" ,
+  credentials: true
+}));
 app.use(express.json());
 
 const mongoClient = await connectToMongoDB();
@@ -35,29 +39,30 @@ const borrowsCollection = db.collection("borrows");
 // 🔐 JWT Verification Middleware (BetterAuth JWKS)
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ msg: "Unauthorized" });
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ msg: "Unauthorized: No token provided" });
   }
   const token = authHeader.split(" ")[1];
 
   const JWKS = createRemoteJWKSet(
-    new URL(`${process.env.CLIENT_URL}/api/auth/jwks`)
+    new URL(`${process.env.CLIENT_URL || "http://localhost:3000"}/api/auth/jwks`)
   );
 
   try {
     await jwtVerify(token, JWKS);
     next();
   } catch (error) {
-    return res.status(401).json({ msg: "Invalid or expired token" });
+    console.error("JWT Verification Error:", error.message);
+    return res.status(401).json({ msg: "Unauthorized: Invalid or expired token" });
   }
 };
 
 // 📚 BOOKS ROUTES
 
-// GET /books — public, sorted newest first
+// GET /books — public
 app.get("/books", async (req, res) => {
   try {
-    // ডেটাবেসে createdAt স্ট্রিং হিসেবে থাকলে sort() কাজ করে না, তাই আপাতত sort বাদ দেওয়া হলো
+    // createdAt ডেট টাইপ হিসেবে সেভ হলে সর্ট কাজ করবে, আপাতত সর্ট ছাড়া সব ডেটা নিচ্ছি
     const books = await booksCollection.find().toArray();
     res.json(books);
   } catch (error) {
@@ -72,14 +77,14 @@ app.get("/books/:id", async (req, res) => {
     if (!book) return res.status(404).json({ msg: "Book not found" });
     res.json(book);
   } catch (error) {
-    res.status(500).json({ msg: "Invalid book ID" });
+    res.status(500).json({ msg: "Invalid book ID format" });
   }
 });
 
-// POST /books — protected
+// POST /books — protected (Add a Book)
 app.post("/books", verifyToken, async (req, res) => {
   try {
-    // নতুন আইডি জেনারেট করা (সর্বোচ্চ আইডি + ১)
+    // অটোমেটিক নতুন _id জেনারেট করা
     const lastBook = await booksCollection.find().sort({ _id: -1 }).limit(1).toArray();
     const newId = lastBook.length > 0 ? lastBook[0]._id + 1 : 1;
 
@@ -89,14 +94,14 @@ app.post("/books", verifyToken, async (req, res) => {
       createdAt: new Date(),
       availableCopies: req.body.totalCopies || 1,
     };
-    const result = await booksCollection.insertOne(book);
+    await booksCollection.insertOne(book);
     res.status(201).json(book);
   } catch (error) {
     res.status(500).json({ msg: "Failed to add book", error: error.message });
   }
 });
 
-// PATCH /books/:id — protected
+// PATCH /books/:id — protected (Update a Book)
 app.patch("/books/:id", verifyToken, async (req, res) => {
   try {
     const result = await booksCollection.updateOne(
@@ -109,7 +114,7 @@ app.patch("/books/:id", verifyToken, async (req, res) => {
   }
 });
 
-// DELETE /books/:id — protected
+// DELETE /books/:id — protected (Delete a Book)
 app.delete("/books/:id", verifyToken, async (req, res) => {
   try {
     const result = await booksCollection.deleteOne({ _id: Number(req.params.id) });
@@ -121,12 +126,13 @@ app.delete("/books/:id", verifyToken, async (req, res) => {
 
 // 📖 BORROWS ROUTES
 
-// POST /borrows — protected
+// POST /borrows — protected (Borrow a Book)
 app.post("/borrows", verifyToken, async (req, res) => {
   try {
     const { bookId, userEmail } = req.body;
     const numericBookId = Number(bookId);
 
+    // ডাবল বরো চেক
     const existing = await borrowsCollection.findOne({
       bookId: numericBookId,
       userEmail,
@@ -136,11 +142,13 @@ app.post("/borrows", verifyToken, async (req, res) => {
       return res.status(400).json({ msg: "You already borrowed this book" });
     }
 
+    // কপি অ্যাভেইলেবল চেক
     const book = await booksCollection.findOne({ _id: numericBookId });
     if (!book || book.availableCopies <= 0) {
       return res.status(400).json({ msg: "No copies available" });
     }
 
+    // কপি কমিয়ে দেওয়া ($inc)
     await booksCollection.updateOne(
       { _id: numericBookId },
       { $inc: { availableCopies: -1 } }
@@ -152,7 +160,7 @@ app.post("/borrows", verifyToken, async (req, res) => {
       bookImage: book.image,
       userEmail,
       borrowDate: new Date(),
-      returnDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      returnDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // ৭ দিন পর
       status: "active",
     };
     const result = await borrowsCollection.insertOne(borrow);
@@ -162,7 +170,7 @@ app.post("/borrows", verifyToken, async (req, res) => {
   }
 });
 
-// GET /borrows — protected
+// GET /borrows — protected (Get my borrows)
 app.get("/borrows", verifyToken, async (req, res) => {
   try {
     const { email } = req.query;
@@ -176,12 +184,13 @@ app.get("/borrows", verifyToken, async (req, res) => {
   }
 });
 
-// DELETE /borrows/:id — protected
+// DELETE /borrows/:id — protected (Return a book)
 app.delete("/borrows/:id", verifyToken, async (req, res) => {
   try {
     const borrow = await borrowsCollection.findOne({ _id: new ObjectId(req.params.id) });
     if (!borrow) return res.status(404).json({ msg: "Borrow record not found" });
 
+    // কপি আবার বাড়িয়ে দেওয়া
     await booksCollection.updateOne(
       { _id: borrow.bookId },
       { $inc: { availableCopies: 1 } }
@@ -196,7 +205,7 @@ app.delete("/borrows/:id", verifyToken, async (req, res) => {
 
 // Health check
 app.get("/", (req, res) => {
-  res.json({ message: "Server is running fine!" });
+  res.json({ message: "BookNook server is running fine!" });
 });
 
 app.listen(PORT, () => {
