@@ -24,4 +24,4 @@ This repository contains the **Backend (Server)** code for the BookNook online l
 ## 🚀 How to Run Locally
 1. Clone the repository:
    ```bash
-   git clone <your-server-repo-link>
+   git clone <https://github.com/Pollab-Das/B14-A08-BookNook-server>
