@@ -5,7 +5,7 @@ import "dotenv/config";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import dns from "node:dns/promises";
 
-// DNS রিজলভ ইস্যু এড়াতে
+
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 const app = express();
@@ -24,9 +24,9 @@ async function connectToMongoDB() {
   }
 }
 
-// CORS কনফিগারেশন (ফ্রন্টএন্ড থেকে রিকোয়েস্ট অ্যালাউ করার জন্য)
+// CORS 
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:3000" ||"https://b14-a08-book-nook-client.vercel.app" ,
+  origin: process.env.CLIENT_URL || "http://localhost:3000" ||"https://b14-a08-book-nook-client.vercel.app" || "https://b14-a08-booknook-server.onrender.com" ,
   credentials: true
 }));
 app.use(express.json());
@@ -62,7 +62,7 @@ const verifyToken = async (req, res, next) => {
 // GET /books — public
 app.get("/books", async (req, res) => {
   try {
-    // createdAt ডেট টাইপ হিসেবে সেভ হলে সর্ট কাজ করবে, আপাতত সর্ট ছাড়া সব ডেটা নিচ্ছি
+    // createdAt 
     const books = await booksCollection.find().toArray();
     res.json(books);
   } catch (error) {
@@ -84,7 +84,7 @@ app.get("/books/:id", async (req, res) => {
 // POST /books — protected (Add a Book)
 app.post("/books", verifyToken, async (req, res) => {
   try {
-    // অটোমেটিক নতুন _id জেনারেট করা
+    // new _id 
     const lastBook = await booksCollection.find().sort({ _id: -1 }).limit(1).toArray();
     const newId = lastBook.length > 0 ? lastBook[0]._id + 1 : 1;
 
@@ -132,7 +132,7 @@ app.post("/borrows", verifyToken, async (req, res) => {
     const { bookId, userEmail } = req.body;
     const numericBookId = Number(bookId);
 
-    // ডাবল বরো চেক
+    
     const existing = await borrowsCollection.findOne({
       bookId: numericBookId,
       userEmail,
@@ -142,13 +142,13 @@ app.post("/borrows", verifyToken, async (req, res) => {
       return res.status(400).json({ msg: "You already borrowed this book" });
     }
 
-    // কপি অ্যাভেইলেবল চেক
+    
     const book = await booksCollection.findOne({ _id: numericBookId });
     if (!book || book.availableCopies <= 0) {
       return res.status(400).json({ msg: "No copies available" });
     }
 
-    // কপি কমিয়ে দেওয়া ($inc)
+    // ($inc)
     await booksCollection.updateOne(
       { _id: numericBookId },
       { $inc: { availableCopies: -1 } }
@@ -190,7 +190,7 @@ app.delete("/borrows/:id", verifyToken, async (req, res) => {
     const borrow = await borrowsCollection.findOne({ _id: new ObjectId(req.params.id) });
     if (!borrow) return res.status(404).json({ msg: "Borrow record not found" });
 
-    // কপি আবার বাড়িয়ে দেওয়া
+    // copy
     await booksCollection.updateOne(
       { _id: borrow.bookId },
       { $inc: { availableCopies: 1 } }
