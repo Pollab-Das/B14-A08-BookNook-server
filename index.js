@@ -19,14 +19,14 @@ async function connectToMongoDB() {
     console.log("✅ Connected to MongoDB");
     return client;
   } catch (err) {
-    console.error("❌ MongoDB connection failed:", err);
+    console.error("❌ MongoDB connection failed:", err)
     process.exit(1);
   }
 }
 
 // CORS 
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:3000" ||"https://b14-a08-book-nook-client.vercel.app" || "https://b14-a08-booknook-server.onrender.com" ,
+  origin: process.env.CLIENT_URL || "http://localhost:3000" || "https://b14-a08-book-nook-client.vercel.app" || "https://b14-a08-booknook-server.onrender.com" ,
   credentials: true
 }));
 app.use(express.json());
